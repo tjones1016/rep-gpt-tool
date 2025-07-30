@@ -1,5 +1,3 @@
-# rep_gpt_tool.py or app.py
-
 import streamlit as st
 import openai
 
@@ -16,14 +14,14 @@ user_input = st.text_area("Enter your question:", height=100)
 
 # Send request to OpenAI
 if st.button("Send") and user_input.strip():
-with st.spinner("Thinking..."):
-response = openai.ChatCompletion.create(
-model="gpt-4o",
-messages=[
-{"role": "system", "content": "You are a helpful assistant for field sales and roofing reps. Keep answers short, clear, and action-focused."},
-{"role": "user", "content": user_input}
-]
-)
-reply = response.choices[0].message.content
-st.markdown("### 💬 GPT Response")
-st.write(reply)
+    with st.spinner("Thinking..."):
+        response = openai.ChatCompletion.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant for field sales and roofing reps. Keep answers short, clear, and action-focused."},
+                {"role": "user", "content": user_input}
+            ]
+        )
+        reply = response.choices[0].message.content
+        st.markdown("### 💬 GPT Response")
+        st.write(reply)
