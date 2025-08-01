@@ -1,54 +1,51 @@
-import os
 import streamlit as st
-from dotenv import load_dotenv
+from langchain.document_loaders import PyMuPDFLoader, Docx2txtLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
-from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.chains import RetrievalQA
 from langchain.chat_models import ChatOpenAI
-from langchain.document_loaders import PyPDFLoader, Docx2txtLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+import openai
+import os
 
-# Load your OpenAI API key
-load_dotenv()
-openai_api_key = os.getenv("OPENAI_API_KEY")
+# 🔑 Load API key from Streamlit secrets
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-st.set_page_config(page_title="Rep GPT Tool")
-st.title("📣 Pro-Roofing AI Sales Assistant")
-
-# Load and embed documents
+# 🧠 Build RAG pipeline with LangChain
 @st.cache_resource
 def setup_qa_chain():
-    loaders = [
-        Docx2txtLoader("data/Sales Guide.docx"),
-        PyPDFLoader("data/D2D Conversion Script.pdf")
-    ]
+# Load documents
+loaders = [
+Docx2txtLoader("data/sales_guide.docx"),
+PyMuPDFLoader("data/d2d_script.pdf")
+]
+documents = []
+for loader in loaders:
+documents.extend(loader.load())
 
-    docs = []
-    for loader in loaders:
-        docs.extend(loader.load())
+# Split documents
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+chunks = text_splitter.split_documents(documents)
 
-    # Chunk the documents for better retrieval
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
-    split_docs = splitter.split_documents(docs)
+# Embed and store in FAISS
+embeddings = OpenAIEmbeddings()
+vectorstore = FAISS.from_documents(chunks, embeddings)
 
-    # Create or load the vector store
-    if os.path.exists("vectorstore/index.faiss"):
-        db = FAISS.load_local("vectorstore", OpenAIEmbeddings())
-    else:
-        db = FAISS.from_documents(split_docs, OpenAIEmbeddings())
-        db.save_local("vectorstore")
+# Build retrieval QA chain
+retriever = vectorstore.as_retriever()
+llm = ChatOpenAI(model_name="gpt-4", temperature=0)
+return RetrievalQA.from_chain_type(llm=llm, retriever=retriever)
 
-    llm = ChatOpenAI(model="gpt-4", temperature=0.2)
-    retriever = db.as_retriever()
-    return RetrievalQA.from_chain_type(llm=llm, retriever=retriever)
+# UI
+st.set_page_config(page_title="📣 Pro-Roofing AI Sales Assistant")
+st.title("📣 Pro-Roofing AI Sales Assistant")
+st.caption("Ask a question and the assistant will answer using your training documents.")
 
-# Set up the RAG chain
+user_input = st.text_area("What do you want to ask?", height=100)
 qa_chain = setup_qa_chain()
 
-# User input field
-query = st.text_input("Ask a question about sales, scripts, objections, or processes:", "")
-
-if query:
-    with st.spinner("Searching your training materials..."):
-        answer = qa_chain.run(query)
-        st.markdown(f"### 🧠 Answer:\n{answer}")
+if st.button("Ask") and user_input.strip():
+with st.spinner("Thinking..."):
+result = qa_chain.run(user_input)
+st.markdown("### 💬 Response")
+st.write(result)
