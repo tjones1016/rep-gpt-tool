@@ -1,49 +1,54 @@
+import os
 import streamlit as st
-import openai
+from dotenv import load_dotenv
+from langchain.vectorstores import FAISS
+from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain.chains import RetrievalQA
+from langchain.chat_models import ChatOpenAI
+from langchain.document_loaders import PyPDFLoader, Docx2txtLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-# Initialize OpenAI client using new SDK structure
-client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+# Load your OpenAI API key
+load_dotenv()
+openai_api_key = os.getenv("OPENAI_API_KEY")
 
-# Streamlit page config
-st.set_page_config(page_title="Rep GPT Assistant", page_icon="🛠️")
-st.title("🛠️ Rep GPT Assistant")
-st.caption("Your AI-powered field sales and roofing helper.")
+st.set_page_config(page_title="Rep GPT Tool")
+st.title("📣 Pro-Roofing AI Sales Assistant")
 
-# User input area
-user_input = st.text_area(
-    "Ask a question:",
-    placeholder="Example: How do I explain the difference between shingles?",
-    height=100
-)
+# Load and embed documents
+@st.cache_resource
+def setup_qa_chain():
+    loaders = [
+        Docx2txtLoader("data/Sales Guide.docx"),
+        PyPDFLoader("data/D2D Conversion Script.pdf")
+    ]
 
-# Generate GPT response
-if st.button("Send") and user_input.strip():
-    with st.spinner("Thinking..."):
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": """
-You are RepBot, a knowledgeable and helpful AI assistant for Pro Roofing field reps.
+    docs = []
+    for loader in loaders:
+        docs.extend(loader.load())
 
-Your job is to:
-- Answer product and service questions clearly.
-- Help reps explain roofing options, materials, and warranties to customers.
-- Assist with estimating, scheduling, and sales guidance.
-- Write short, professional messages reps can send to customers.
-- Keep answers under 100 words unless asked for more.
-- Avoid technical jargon—keep it simple and friendly.
+    # Chunk the documents for better retrieval
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
+    split_docs = splitter.split_documents(docs)
 
-Always speak in a respectful, confident, and helpful tone.
-                        """.strip()
-                    },
-                    {"role": "user", "content": user_input}
-                ]
-            )
-            reply = response.choices[0].message.content.strip()
-            st.markdown("### 💬 GPT Response")
-            st.write(reply)
-        except Exception as e:
-            st.error(f"Something went wrong: {e}")
+    # Create or load the vector store
+    if os.path.exists("vectorstore/index.faiss"):
+        db = FAISS.load_local("vectorstore", OpenAIEmbeddings())
+    else:
+        db = FAISS.from_documents(split_docs, OpenAIEmbeddings())
+        db.save_local("vectorstore")
+
+    llm = ChatOpenAI(model="gpt-4", temperature=0.2)
+    retriever = db.as_retriever()
+    return RetrievalQA.from_chain_type(llm=llm, retriever=retriever)
+
+# Set up the RAG chain
+qa_chain = setup_qa_chain()
+
+# User input field
+query = st.text_input("Ask a question about sales, scripts, objections, or processes:", "")
+
+if query:
+    with st.spinner("Searching your training materials..."):
+        answer = qa_chain.run(query)
+        st.markdown(f"### 🧠 Answer:\n{answer}")
