@@ -20,7 +20,10 @@ def setup_qa_chain():
     ]
     documents = []
     for loader in loaders:
-        documents.extend(loader.load())
+        try:
+            documents.extend(loader.load())
+        except Exception as e:
+            st.error(f"❌ Failed to load {loader}: {str(e)}")
 
     # Split documents into chunks
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
