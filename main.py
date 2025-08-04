@@ -19,11 +19,12 @@ def setup_qa_chain():
         PyMuPDFLoader("data/d2d_script.pdf")
     ]
     documents = []
-    for loader in loaders:
-        try:
-            documents.extend(loader.load())
-        except Exception as e:
-            st.error(f"❌ Failed to load {loader}: {str(e)}")
+for loader in loaders:
+    try:
+        documents.extend(loader.load())
+    except Exception as e:
+        st.error(f"❌ Failed to load {loader}: {str(e)}")
+
 
     # Split documents into chunks
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
