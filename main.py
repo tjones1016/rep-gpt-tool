@@ -6,49 +6,39 @@ from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 from langchain.chat_models import ChatOpenAI
 import openai
+import os
 
-# 🔑 Load API key from Streamlit secrets
-openai.api_key = st.secrets["OPENAI_API_KEY"]
-
-# 🧠 Build RAG pipeline with LangChain
-@st.cache_resource
-def setup_qa_chain():
-    # Load documents
-    loaders = [
-        Docx2txtLoader("data/sales_guide.docx"),
-        PyMuPDFLoader("data/d2d_script.pdf")
-    ]
-    documents = []
-for loader in loaders:
-    try:
-        documents.extend(loader.load())
-    except Exception as e:
-        st.error(f"❌ Failed to load {loader}: {str(e)}")
-
-
-    # Split documents into chunks
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    chunks = text_splitter.split_documents(documents)
-
-    # Create embeddings and store in FAISS
-    embeddings = OpenAIEmbeddings()
-    vectorstore = FAISS.from_documents(chunks, embeddings)
-
-    # Create Retrieval QA chain
-    retriever = vectorstore.as_retriever()
-    llm = ChatOpenAI(model_name="gpt-4", temperature=0)
-    return RetrievalQA.from_chain_type(llm=llm, retriever=retriever)
-
-# 🔵 Streamlit UI
+# Page setup
 st.set_page_config(page_title="📣 Pro-Roofing AI Sales Assistant")
 st.title("📣 Pro-Roofing AI Sales Assistant")
 st.caption("Ask a question and the assistant will answer using your training documents.")
 
-user_input = st.text_area("What do you want to ask?", height=100)
-qa_chain = setup_qa_chain()
+# API key
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-if st.button("Ask") and user_input.strip():
-    with st.spinner("Thinking..."):
-        result = qa_chain.run(user_input)
-        st.markdown("### 💬 Response")
-        st.write(result)
+# Function to load and process documents
+@st.cache_resource
+def setup_qa_chain():
+    loaders = []
+    error_messages = []
+
+    # Attempt to load both documents
+    if os.path.exists("data/sales_guide.docx"):
+        loaders.append(Docx2txtLoader("data/sales_guide.docx"))
+    else:
+        error_messages.append("Missing: sales_guide.docx")
+
+    if os.path.exists("data/d2d_script.pdf"):
+        loaders.append(PyMuPDFLoader("data/d2d_script.pdf"))
+    else:
+        error_messages.append("Missing: d2d_script.pdf")
+
+    if error_messages:
+        st.warning("⚠️ Some files are missing:\n\n" + "\n".join(error_messages))
+
+    documents = []
+    for loader in loaders:
+        try:
+            documents.extend(loader.load())
+        except Exception as e:
+            st.error(f"❌ Error load
