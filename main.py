@@ -41,4 +41,4 @@ def setup_qa_chain():
         try:
             documents.extend(loader.load())
         except Exception as e:
-            st.error(f"❌ Error load
+            st.error(f"❌ Error loading {loader}: {str(e)}")
