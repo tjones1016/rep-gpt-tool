@@ -1,6 +1,7 @@
 streamlit
 openai
 langchain
+PyMuPDF
+docx2txt
 faiss-cpu
-python-docx
-PYMUPDF
+tiktoken
