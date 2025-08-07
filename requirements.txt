@@ -1,8 +1,10 @@
 streamlit
 openai>=1.0.0
-langchain>=0.1.0
-langchain-community>=0.0.24
+langchain>=0.1.14
+langchain-community>=0.0.26
 python-dotenv
 docx2txt
 PyPDF2
+tiktoken
+faiss-cpu
 
