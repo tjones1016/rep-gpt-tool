@@ -1,10 +1,8 @@
-streamlit>=1.25
-openai
-langchain
-langchain-community
-faiss-cpu
-python-docx
-pypdf
+streamlit
+openai>=1.0.0
+langchain>=0.1.0
+langchain-community>=0.0.24
 python-dotenv
 docx2txt
-openai>=1.0.0
+PyPDF2
+
