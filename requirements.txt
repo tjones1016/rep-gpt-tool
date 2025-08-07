@@ -7,3 +7,4 @@ python-docx
 pypdf
 python-dotenv
 docx2txt
+openai>=1.0.0
