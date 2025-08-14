@@ -1,11 +1,11 @@
 import os
 import streamlit as st
 from dotenv import load_dotenv
-from langchain.vectorstores import FAISS
-from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import OpenAIEmbeddings
 from langchain.chains import ConversationalRetrievalChain
 from langchain.chat_models import ChatOpenAI
-from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 # Load environment variables
@@ -15,22 +15,26 @@ openai_api_key = os.getenv("OPENAI_API_KEY")
 st.set_page_config(page_title="Rep GPT Chat", layout="wide")
 st.title("📣 Pro-Roofing AI Sales Assistant (Chat Mode)")
 
-# Load and prepare documents
+def load_all_docs():
+    docs = []
+    for filename in os.listdir("data"):
+        path = os.path.join("data", filename)
+        if filename.lower().endswith(".pdf"):
+            docs.extend(PyPDFLoader(path).load())
+        elif filename.lower().endswith(".docx"):
+            docs.extend(Docx2txtLoader(path).load())
+        elif filename.lower().endswith(".txt"):
+            docs.extend(TextLoader(path).load())
+    return docs
+
 @st.cache_resource
 def setup_conversational_chain():
-    loaders = [
-        Docx2txtLoader("data/sales_guide.docx"),
-        PyPDFLoader("data/d2d_script.pdf")
-    ]
-    docs = []
-    for loader in loaders:
-        docs.extend(loader.load())
-
+    docs = load_all_docs()
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
     split_docs = splitter.split_documents(docs)
 
     if os.path.exists("vectorstore/index.faiss"):
-        db = FAISS.load_local("vectorstore", OpenAIEmbeddings())
+        db = FAISS.load_local("vectorstore", OpenAIEmbeddings(), allow_dangerous_deserialization=True)
     else:
         db = FAISS.from_documents(split_docs, OpenAIEmbeddings())
         db.save_local("vectorstore")
@@ -54,13 +58,11 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 # User input
-if prompt := st.chat_input("Ask about sales, pay, objections, or process steps..."):
+if prompt := st.chat_input("Ask about sales, pay, objections, pricing, or process steps..."):
     # Show user message
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     # Run chain with history
     result = qa_chain.run({"question": prompt, "chat_history": st.session_state.chat_history})
-    st.chat_message("assistant").markdown(result)
-    st.session_state.messages.append({"role": "assistant", "content": result})
-    st.session_state.chat_history.append((prompt, result))
+    st.chat_message("assista_
