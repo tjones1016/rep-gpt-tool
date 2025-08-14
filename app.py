@@ -15,6 +15,7 @@ openai_api_key = os.getenv("OPENAI_API_KEY")
 st.set_page_config(page_title="Rep GPT Chat", layout="wide")
 st.title("📣 Pro-Roofing AI Sales Assistant (Chat Mode)")
 
+# Function to load all files in /data folder
 def load_all_docs():
     docs = []
     for filename in os.listdir("data"):
@@ -34,7 +35,11 @@ def setup_conversational_chain():
     split_docs = splitter.split_documents(docs)
 
     if os.path.exists("vectorstore/index.faiss"):
-        db = FAISS.load_local("vectorstore", OpenAIEmbeddings(), allow_dangerous_deserialization=True)
+        db = FAISS.load_local(
+            "vectorstore", 
+            OpenAIEmbeddings(), 
+            allow_dangerous_deserialization=True
+        )
     else:
         db = FAISS.from_documents(split_docs, OpenAIEmbeddings())
         db.save_local("vectorstore")
@@ -65,4 +70,6 @@ if prompt := st.chat_input("Ask about sales, pay, objections, pricing, or proces
 
     # Run chain with history
     result = qa_chain.run({"question": prompt, "chat_history": st.session_state.chat_history})
-    st.chat_message("assista_
+    st.chat_message("assistant").markdown(result)
+    st.session_state.messages.append({"role": "assistant", "content": result})
+    st.session_state.chat_history.append((prompt, result))
