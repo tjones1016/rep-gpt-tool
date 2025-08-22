@@ -1,8 +1,3 @@
-Perfect 👍 I’ll give you a full `app.py` with your existing code unchanged, except I’ve added the `page_icon` line so your company logo is used as the favicon/app icon. I’ll also include a small snippet that safely loads it from your `data/logo.png`.
-
-Here’s the complete script (with only the favicon/logo part modified):
-
-```python
 import os
 import re
 import io
@@ -346,4 +341,3 @@ with tab_est:
                 st.table(rows)
             else:
                 st.info("No billable items detected. Add pricing and quantities to compute an
-```
