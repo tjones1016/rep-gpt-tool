@@ -6,7 +6,7 @@ from typing import Dict, Any, Tuple
 import streamlit as st
 from dotenv import load_dotenv
 
-# LangChain + RAG bits (unchanged, but now loads all files in /data)
+# LangChain + RAG bits
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import OpenAIEmbeddings
 from langchain.chains import ConversationalRetrievalChain
@@ -24,12 +24,14 @@ import docx2txt
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Set page config with logo as favicon/app icon
+# -----------------------------
+# Page config with company logo
+# -----------------------------
 logo_path = os.path.join("data", "logo.png")
 if os.path.exists(logo_path):
     st.set_page_config(
         page_title="Rep GPT — Chat + Estimates",
-        page_icon=logo_path,   # uses your logo.png as favicon/home screen icon
+        page_icon=logo_path,   # uses your logo as favicon/home screen icon
         layout="wide"
     )
 else:
@@ -87,7 +89,6 @@ qa_chain = setup_conversational_chain()
 # -----------------------------
 @st.cache_data(show_spinner=False)
 def read_pricing_text() -> str:
-    """Read text from data/pricing_guide.docx if present."""
     pg_path = os.path.join("data", "pricing_guide.docx")
     if os.path.exists(pg_path):
         try:
@@ -340,4 +341,6 @@ with tab_est:
                     })
                 st.table(rows)
             else:
-                st.info("No billable items detected. Add pricing and quantities to compute an
+                st.info("No billable items detected. Add pricing and quantities to compute an estimate.")
+
+            st.write(f"**Total Estimate:** ${total:.2f}")
