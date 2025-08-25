@@ -4,6 +4,26 @@ import io
 from typing import Dict, Any, Tuple
 
 import streamlit as st
+
+# -----------------------------
+# Mobile / home-screen icon setup
+# -----------------------------
+logo_path = "data/logo.png"  # your logo file in /data
+
+# Standard favicon and page title
+st.set_page_config(
+    page_title="Rep GPT — Chat + Estimates",
+    page_icon=logo_path,
+    layout="wide"
+)
+
+# Explicit iOS / Android home-screen icons
+st.markdown(f"""
+<link rel="apple-touch-icon" sizes="180x180" href="{logo_path}">
+<link rel="icon" type="image/png" sizes="32x32" href="{logo_path}">
+<link rel="icon" type="image/png" sizes="16x16" href="{logo_path}">
+""", unsafe_allow_html=True)
+
 from dotenv import load_dotenv
 
 # LangChain + RAG bits
