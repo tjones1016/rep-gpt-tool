@@ -6,6 +6,22 @@ from typing import Dict, Any, Tuple
 import streamlit as st
 from dotenv import load_dotenv
 
+# -----------------------------
+# NEW: Apple Touch Icon for iPhone
+# -----------------------------
+# Make sure you have `apple-touch-icon.png` in the same folder as this app.py
+# This ensures iPhones use it when users "Add to Home Screen"
+st.set_page_config(
+    page_title="Rep GPT — Chat + Estimates",
+    page_icon="apple-touch-icon.png",  # your logo file
+    layout="wide"
+)
+
+# Optional: enforce Apple Touch Icon in HTML (extra safety for iPhones)
+st.markdown("""
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+""", unsafe_allow_html=True)
+
 # LangChain + RAG bits (unchanged, but now loads all files in /data)
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import OpenAIEmbeddings
@@ -24,7 +40,6 @@ import docx2txt
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-st.set_page_config(page_title="Rep GPT — Chat + Estimates", layout="wide")
 st.title("📣 Pro-Roofing AI Sales Assistant")
 
 # -----------------------------
@@ -49,6 +64,7 @@ def load_all_docs():
 def setup_conversational_chain():
     docs = load_all_docs()
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
+
     split_docs = splitter.split_documents(docs)
 
     # Vector store cache
