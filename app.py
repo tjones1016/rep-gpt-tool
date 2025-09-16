@@ -1,7 +1,6 @@
 import os
-import io
 import re
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Optional
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -93,34 +92,48 @@ HARDCODED_KNOWLEDGE = {
     ),
     "aro": (
         "The ARO formula:\n"
-        "1. Assume the sale\n"
-        "2. Rebuttal (handle objections)\n"
-        "3. Overcome"
+        "1. Acknowledge — validate the homeowner's concern "
+        "(e.g. 'I hear you, that sounds stressful')\n"
+        "2. Reassure — provide confident reassurance "
+        "(e.g. 'We'll walk you through this')\n"
+        "3. Overcome — pivot to the next step (inspection, filing the claim, referral, or close)"
     ),
     "pricing_payment_accountability": (
         "After filing the claim, the rep should explain **Pricing, Payment, and Accountability**:\n"
-        "- **Pricing**: Adjusters use Xactimate pricing software.\n"
-        "- **Payment**: Homeowner pays in three parts: 1st payment, deductible, and 2nd payment after work is done.\n"
-        "- **Accountability**: No money is saved by the homeowner, the carrier is in control. "
-        "Use the *body shop analogy* to show how simple and standard the process is."
+        "- **Pricing**: Adjusters use Xactimate to price the claim.\n"
+        "- **Payment**: Typical flow — 1st payment (initial/ACV), homeowner deductible, "
+        "then 2nd payment (recoverable depreciation/final check).\n"
+        "- **Accountability**: The carrier controls the process; there is no money 'saved' "
+        "by choosing a cheaper contractor. Use the 'body shop' analogy to explain how "
+        "insurance sets the amount and the contractor performs the repair."
     ),
     "file_claim": (
-        "If you're not sure whether there’s enough damage on a roof, always end with: "
+        "If you're not sure whether there’s enough damage on a roof, always end with:\n"
         "\"File the Claim — let the adjuster make the call.\""
     )
 }
 
-def inject_hardcoded_answers(user_input: str) -> str | None:
-    text = user_input.lower()
-    if "slap" in text:
-        return HARDCODED_KNOWLEDGE["slap"]
-    if "aro" in text:
+def inject_hardcoded_answers(user_input: str) -> Optional[str]:
+    text = user_input.lower().strip()
+
+    if re.search(r"\baro\b", text) or "what is aro" in text or "what's aro" in text:
         return HARDCODED_KNOWLEDGE["aro"]
-    if "pricing" in text or "payment" in text or "accountability" in text:
+
+    if "slap" in text or "what is slap" in text or "what's slap" in text:
+        return HARDCODED_KNOWLEDGE["slap"]
+
+    if any(k in text for k in ("pricing", "payment", "accountability", "xactimate", "deductible", "recoverable depreciation")):
         return HARDCODED_KNOWLEDGE["pricing_payment_accountability"]
-    if "not sure" in text and "damage" in text:
+
+    if re.search(r"(not sure|unsure|borderline|maybe).*damage", text) or re.search(r"enough damage", text):
         return HARDCODED_KNOWLEDGE["file_claim"]
+
     return None
+
+def needs_file_claim_append(user_input: str) -> bool:
+    """Check if the query mentions uncertainty about roof damage — to append 'File the Claim' reminder."""
+    text = user_input.lower()
+    return bool(re.search(r"(not sure|unsure|borderline|maybe).*damage", text) or "enough damage" in text)
 
 # -----------------------------
 # Chat UI
@@ -140,12 +153,15 @@ if prompt := st.chat_input("Type your question…"):
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
-    # Check hardcoded answers first
+    # Hardcoded answers first
     hardcoded = inject_hardcoded_answers(prompt)
     if hardcoded:
         result = hardcoded
     else:
         result = qa_chain.run({"question": prompt, "chat_history": st.session_state.chat_history})
+        # Safety net: append file-claim guidance if the question suggests uncertainty
+        if needs_file_claim_append(prompt):
+            result += "\n\n" + HARDCODED_KNOWLEDGE["file_claim"]
 
     st.chat_message("assistant").markdown(result)
     st.session_state.messages.append({"role": "assistant", "content": result})
