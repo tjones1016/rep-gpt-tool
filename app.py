@@ -1,168 +1,120 @@
 import os
-import re
-from typing import Dict, Any, Optional
-
 import streamlit as st
-from dotenv import load_dotenv
+import pandas as pd
 
-# -----------------------------
-# App Config
-# -----------------------------
-st.set_page_config(
-    page_title="Rep GPT — Pro-Roofing Sales Assistant",
-    page_icon="apple-touch-icon.png",
-    layout="wide"
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, CSVLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain.vectorstores import FAISS
+from langchain.chains import ConversationalRetrievalChain
+
+# --- Hard-coded rules ---
+HARD_CODED_KNOWLEDGE = """
+SLAP Formula:
+- Say hi and introduce yourself
+- Let them know why you’re here
+- Ask an open-ended question
+- Present your pitch
+
+ARO Formula:
+- Acknowledge
+- Reassure
+- Overcome
+
+Pricing, Payment, Accountability:
+- Pricing: Adjusters use Xactimate for all estimates
+- Payment: 1st payment, deductible, 2nd payment
+- Accountability: Homeowner saves no money, the carrier controls the process, use the body shop analogy to communicate simplicity
+
+Uncertainty Rule:
+- If you’re unsure whether there’s enough roof damage, end with: "File the Claim — let the adjuster make the call."
+"""
+
+PRICING_DISCLAIMER = (
+    "Always confirm with Xactimate if an adjuster asks about pricing. "
+    "These prices are for rep reference only."
 )
 
-st.markdown("""
-<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
-""", unsafe_allow_html=True)
-
-# -----------------------------
-# LangChain + RAG
-# -----------------------------
-from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import OpenAIEmbeddings
-from langchain.chains import ConversationalRetrievalChain
-from langchain.chat_models import ChatOpenAI
-from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-
-from PyPDF2 import PdfReader
-import docx2txt
-
-# -----------------------------
-# Setup
-# -----------------------------
-load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-st.title("📣 Pro-Roofing AI Sales Assistant")
-
-# -----------------------------
-# Load docs from /data
-# -----------------------------
-def load_all_docs():
-    docs = []
-    data_dir = "data"
-    if not os.path.isdir(data_dir):
-        return docs
-    for filename in os.listdir(data_dir):
-        path = os.path.join(data_dir, filename)
-        if filename.lower().endswith(".pdf"):
-            docs.extend(PyPDFLoader(path).load())
-        elif filename.lower().endswith(".docx"):
-            docs.extend(Docx2txtLoader(path).load())
-        elif filename.lower().endswith(".txt"):
-            docs.extend(TextLoader(path).load())
-    return docs
-
+# --- Load documents into FAISS ---
 @st.cache_resource
-def setup_conversational_chain():
-    docs = load_all_docs()
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
-    split_docs = splitter.split_documents(docs)
+def load_vectorstore():
+    loaders = [
+        Docx2txtLoader("data/sales_guide.docx"),
+        Docx2txtLoader("data/sales_guide3.docx"),
+        PyPDFLoader("data/d2d_script.pdf"),
+    ]
+    docs = []
+    for loader in loaders:
+        docs.extend(loader.load())
 
-    if os.path.exists("vectorstore/index.faiss"):
-        db = FAISS.load_local(
-            "vectorstore",
-            OpenAIEmbeddings(),
-            allow_dangerous_deserialization=True
-        )
-    else:
-        db = FAISS.from_documents(split_docs, OpenAIEmbeddings())
-        db.save_local("vectorstore")
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    split_docs = text_splitter.split_documents(docs)
 
-    retriever = db.as_retriever()
-    llm = ChatOpenAI(model="gpt-4", temperature=0.2)
-    return ConversationalRetrievalChain.from_llm(llm, retriever=retriever)
+    embeddings = OpenAIEmbeddings()
+    return FAISS.from_documents(split_docs, embeddings)
 
-qa_chain = setup_conversational_chain()
+# --- Load pricing CSV ---
+@st.cache_resource
+def load_pricing():
+    try:
+        df = pd.read_csv("data/pricing.csv")
+        return df
+    except Exception as e:
+        st.error(f"Error loading pricing.csv: {e}")
+        return pd.DataFrame()
 
-# -----------------------------
-# Hardcoded Sales Knowledge
-# -----------------------------
-HARDCODED_KNOWLEDGE = {
-    "slap": (
-        "The SLAP formula:\n"
-        "1. Say hi and introduce yourself\n"
-        "2. Let them know why you're here\n"
-        "3. Ask an open-ended question\n"
-        "4. Present your pitch"
-    ),
-    "aro": (
-        "The ARO formula:\n"
-        "1. Acknowledge — validate the homeowner's concern "
-        "(e.g. 'I hear you, that sounds stressful')\n"
-        "2. Reassure — provide confident reassurance "
-        "(e.g. 'We'll walk you through this')\n"
-        "3. Overcome — pivot to the next step (inspection, filing the claim, referral, or close)"
-    ),
-    "pricing_payment_accountability": (
-        "After filing the claim, the rep should explain **Pricing, Payment, and Accountability**:\n"
-        "- **Pricing**: Adjusters use Xactimate to price the claim.\n"
-        "- **Payment**: Typical flow — 1st payment (initial/ACV), homeowner deductible, "
-        "then 2nd payment (recoverable depreciation/final check).\n"
-        "- **Accountability**: The carrier controls the process; there is no money 'saved' "
-        "by choosing a cheaper contractor. Use the 'body shop' analogy to explain how "
-        "insurance sets the amount and the contractor performs the repair."
-    ),
-    "file_claim": (
-        "If you're not sure whether there’s enough damage on a roof, always end with:\n"
-        "\"File the Claim — let the adjuster make the call.\""
-    )
-}
-
-def inject_hardcoded_answers(user_input: str) -> Optional[str]:
-    text = user_input.lower().strip()
-
-    if re.search(r"\baro\b", text) or "what is aro" in text or "what's aro" in text:
-        return HARDCODED_KNOWLEDGE["aro"]
-
-    if "slap" in text or "what is slap" in text or "what's slap" in text:
-        return HARDCODED_KNOWLEDGE["slap"]
-
-    if any(k in text for k in ("pricing", "payment", "accountability", "xactimate", "deductible", "recoverable depreciation")):
-        return HARDCODED_KNOWLEDGE["pricing_payment_accountability"]
-
-    if re.search(r"(not sure|unsure|borderline|maybe).*damage", text) or re.search(r"enough damage", text):
-        return HARDCODED_KNOWLEDGE["file_claim"]
-
+def lookup_price(query, df):
+    query_lower = query.lower()
+    for _, row in df.iterrows():
+        item_name = str(row["Item"]).lower()
+        if item_name in query_lower:
+            return f"{row['Item']}: {row['Price']} per {row['Unit']}. Notes: {row.get('Notes','')}\n\n{PRICING_DISCLAIMER}"
     return None
 
-def needs_file_claim_append(user_input: str) -> bool:
-    """Check if the query mentions uncertainty about roof damage — to append 'File the Claim' reminder."""
-    text = user_input.lower()
-    return bool(re.search(r"(not sure|unsure|borderline|maybe).*damage", text) or "enough damage" in text)
+# --- Setup conversational chain ---
+@st.cache_resource
+def setup_conversational_chain(vstore):
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    retriever = vstore.as_retriever(search_kwargs={"k": 3})
+    return ConversationalRetrievalChain.from_llm(llm, retriever)
 
-# -----------------------------
-# Chat UI
-# -----------------------------
-st.caption("Ask about sales, pay, objections, pricing, or process steps. Powered by your `/data` docs + built-in knowledge.")
+# --- Streamlit UI ---
+def main():
+    st.set_page_config(page_title="Pro Roofing AI Assistant", page_icon=":construction:")
+    st.title("🦺 Pro Roofing AI Assistant")
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+    vstore = load_vectorstore()
+    qa_chain = setup_conversational_chain(vstore)
+    pricing_df = load_pricing()
 
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
 
-if prompt := st.chat_input("Type your question…"):
-    st.chat_message("user").markdown(prompt)
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    user_query = st.chat_input("Ask me something...")
+    if user_query:
+        # 1. Check pricing first
+        pricing_answer = lookup_price(user_query, pricing_df)
 
-    # Hardcoded answers first
-    hardcoded = inject_hardcoded_answers(prompt)
-    if hardcoded:
-        result = hardcoded
-    else:
-        result = qa_chain.run({"question": prompt, "chat_history": st.session_state.chat_history})
-        # Safety net: append file-claim guidance if the question suggests uncertainty
-        if needs_file_claim_append(prompt):
-            result += "\n\n" + HARDCODED_KNOWLEDGE["file_claim"]
+        if pricing_answer:
+            bot_response = pricing_answer
+        else:
+            # 2. Query vectorstore
+            result = qa_chain.invoke({"question": user_query, "chat_history": st.session_state.chat_history})
+            bot_response = result["answer"]
 
-    st.chat_message("assistant").markdown(result)
-    st.session_state.messages.append({"role": "assistant", "content": result})
-    st.session_state.chat_history.append((prompt, result))
+            # 3. Add hard-coded rules
+            bot_response += "\n\n" + HARD_CODED_KNOWLEDGE
+
+        # Update chat history
+        st.session_state.chat_history.append(("User", user_query))
+        st.session_state.chat_history.append(("AI", bot_response))
+
+    # Display conversation
+    for speaker, text in st.session_state.chat_history:
+        if speaker == "User":
+            st.chat_message("user").markdown(text)
+        else:
+            st.chat_message("assistant").markdown(text)
+
+if __name__ == "__main__":
+    main()
