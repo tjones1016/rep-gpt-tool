@@ -1,18 +1,21 @@
 import os
+import glob
 import streamlit as st
 from langchain.chat_models import ChatOpenAI
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.document_loaders import TextLoader
 from langchain.chains import ConversationalRetrievalChain
+
+# For loading different document types
+from langchain.document_loaders import UnstructuredWordDocumentLoader, TextLoader
 
 # ---------------------
 # Streamlit Page Config
 # ---------------------
 st.set_page_config(
     page_title="Pro-Roofing AI Assistant",
-    page_icon="apple-touch-icon.png"  # ✅ Uses your logo for tab + favicon
+    page_icon="apple-touch-icon.png"  # Uses your logo for tab + favicon
 )
 
 st.title("🦾 Pro-Roofing AI Assistant")
@@ -27,13 +30,27 @@ if not OPENAI_API_KEY:
     st.stop()
 
 # ---------------------
-# Build Vector DB (example with sales guide)
+# Load all docs from data/
 # ---------------------
 @st.cache_resource
 def load_vectorstore():
-    # You can swap this for multiple docs later
-    loader = TextLoader("data/sales_guide.docx")  # adjust if needed
-    docs = loader.load()
+    docs = []
+
+    for filepath in glob.glob("data/*"):
+        if filepath.endswith(".docx"):
+            loader = UnstructuredWordDocumentLoader(filepath)
+        elif filepath.endswith(".txt"):
+            loader = TextLoader(filepath)
+        else:
+            continue  # skip unsupported files
+        try:
+            docs.extend(loader.load())
+        except Exception as e:
+            st.warning(f"Could not load {filepath}: {e}")
+
+    if not docs:
+        st.error("❌ No documents found in the data folder.")
+        st.stop()
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
