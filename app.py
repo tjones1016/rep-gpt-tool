@@ -1,122 +1,108 @@
 import os
-import glob
 import streamlit as st
-from langchain.chat_models import ChatOpenAI
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.vectorstores import FAISS
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, CSVLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_community.vectorstores import FAISS
 from langchain.chains import ConversationalRetrievalChain
-from langchain.document_loaders import TextLoader
+from langchain.memory import ConversationBufferMemory
 
-# ---------------------
-# Streamlit Page Config
-# ---------------------
-st.set_page_config(
-    page_title="Pro-Roofing AI Assistant",
-    page_icon="apple-touch-icon.png"
-)
+# --- CONFIG ---
+st.set_page_config(page_title="Pro Roofing AI Assistant", page_icon="apple-touch-icon.png")
 
-st.title("🦾 Pro-Roofing AI Assistant")
-st.caption("Powered by LangChain + OpenAI")
-
-# ---------------------
-# Load Environment Vars
-# ---------------------
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
-    st.error("❌ OPENAI_API_KEY not found in environment variables.")
+    st.error("Missing OPENAI_API_KEY in environment variables.")
     st.stop()
 
-# ---------------------
-# Optional DOCX loader
-# ---------------------
-try:
-    from langchain.document_loaders import UnstructuredWordDocumentLoader
-    HAS_UNSTRUCTURED = True
-except ImportError:
-    HAS_UNSTRUCTURED = False
-    st.warning(
-        "⚠️ `unstructured` package not installed. .docx files will be skipped."
-    )
-
-# ---------------------
-# Optional PDF loader
-# ---------------------
-try:
-    from langchain.document_loaders import PyPDFLoader
-    HAS_PDF = True
-except ImportError:
-    HAS_PDF = False
-    st.warning(
-        "⚠️ `PyPDF2` package not installed. PDF files will be skipped."
-    )
-
-# ---------------------
-# Load all docs from data/
-# ---------------------
+# --- LOAD DOCUMENTS ---
 @st.cache_resource
 def load_vectorstore():
     docs = []
 
-    for filepath in glob.glob("data/*"):
-        if filepath.endswith(".txt"):
-            loader = TextLoader(filepath)
-            docs.extend(loader.load())
+    data_files = [
+        "data/d2d_script.pdf",
+        "data/sales_guide.docx",
+        "data/sales_guide3.docx",
+        "data/pricing.csv",
+    ]
+
+    for filepath in data_files:
+        if not os.path.exists(filepath):
+            st.warning(f"File not found: {filepath}")
+            continue
+
+        if filepath.endswith(".pdf"):
+            loader = PyPDFLoader(filepath)
         elif filepath.endswith(".docx"):
-            if HAS_UNSTRUCTURED:
-                loader = UnstructuredWordDocumentLoader(filepath)
-                docs.extend(loader.load())
-            else:
-                st.info(f"Skipping {filepath}: unstructured not installed.")
-        elif filepath.endswith(".pdf"):
-            if HAS_PDF:
-                loader = PyPDFLoader(filepath)
-                docs.extend(loader.load())
-            else:
-                st.info(f"Skipping {filepath}: PyPDF2 not installed.")
+            loader = Docx2txtLoader(filepath)
+        elif filepath.endswith(".csv"):
+            loader = CSVLoader(filepath)
         else:
-            st.info(f"Skipping unsupported file: {filepath}")
+            st.warning(f"Unsupported file type: {filepath}")
+            continue
 
-    if not docs:
-        st.error("❌ No documents could be loaded from the data folder.")
-        st.stop()
+        docs.extend(loader.load())
 
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=100
-    )
+    # Split into chunks
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = splitter.split_documents(docs)
 
     embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-    vectorstore = FAISS.from_documents(chunks, embeddings)
-    return vectorstore
+    return FAISS.from_documents(chunks, embeddings)
 
 vectorstore = load_vectorstore()
 
-# ---------------------
-# Conversational Chain
-# ---------------------
-llm = ChatOpenAI(openai_api_key=OPENAI_API_KEY, model="gpt-4o-mini", temperature=0)
+# --- SETUP CHAIN ---
+memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+
 qa_chain = ConversationalRetrievalChain.from_llm(
-    llm,
-    retriever=vectorstore.as_retriever()
+    llm=ChatOpenAI(temperature=0, openai_api_key=OPENAI_API_KEY),
+    retriever=vectorstore.as_retriever(),
+    memory=memory,
 )
 
-# ---------------------
-# Chat UI
-# ---------------------
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+# --- HARDCODED RULES ---
+def apply_rules(user_input: str):
+    rules = {
+        "slap": "Remember SLAP: Smile, Look, Ask, Pause.",
+        "aro": "Use ARO: Acknowledge, Reassure, Overcome.",
+        "pricing": "Pricing must follow the official pricing guide in pricing.csv.",
+        "payment": "Payment and accountability rules are outlined in the Sales Guide.",
+        "file the claim": "If unsure, fallback to: 'Let’s go ahead and file the claim with the insurance provider.'",
+    }
+    for key, response in rules.items():
+        if key in user_input.lower():
+            return response
+    return None
 
-user_query = st.chat_input("Ask me anything about roofing, sales process, or materials...")
+# --- UI ---
+st.title("🤖 Pro Roofing AI Assistant")
 
-if user_query:
-    result = qa_chain(
-        {"question": user_query, "chat_history": st.session_state.chat_history}
-    )
-    st.session_state.chat_history.append((user_query, result["answer"]))
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-# Display Chat
-for i, (q, a) in enumerate(st.session_state.chat_history):
-    st.chat_message("user").write(q)
-    st.chat_message("assistant").write(a)
+# Display past chat
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+# Input
+if user_input := st.chat_input("Ask me something..."):
+    # Store user message
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    with st.chat_message("user"):
+        st.markdown(user_input)
+
+    # Check hard-coded rules
+    rule_response = apply_rules(user_input)
+    if rule_response:
+        response = rule_response
+    else:
+        result = qa_chain({"question": user_input})
+        response = result["answer"]
+
+    # Store and display response
+    st.session_state.messages.append({"role": "assistant", "content": response})
+    with st.chat_message("assistant"):
+        st.markdown(response)
