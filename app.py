@@ -28,7 +28,7 @@ if not OPENAI_API_KEY:
     st.stop()
 
 # ---------------------
-# Helper: Try to load UnstructuredWordDocumentLoader if available
+# Optional DOCX loader
 # ---------------------
 try:
     from langchain.document_loaders import UnstructuredWordDocumentLoader
@@ -37,6 +37,18 @@ except ImportError:
     HAS_UNSTRUCTURED = False
     st.warning(
         "⚠️ `unstructured` package not installed. .docx files will be skipped."
+    )
+
+# ---------------------
+# Optional PDF loader
+# ---------------------
+try:
+    from langchain.document_loaders import PyPDFLoader
+    HAS_PDF = True
+except ImportError:
+    HAS_PDF = False
+    st.warning(
+        "⚠️ `PyPDF2` package not installed. PDF files will be skipped."
     )
 
 # ---------------------
@@ -55,9 +67,15 @@ def load_vectorstore():
                 loader = UnstructuredWordDocumentLoader(filepath)
                 docs.extend(loader.load())
             else:
-                st.warning(f"Skipping {filepath}: unstructured not installed.")
+                st.info(f"Skipping {filepath}: unstructured not installed.")
+        elif filepath.endswith(".pdf"):
+            if HAS_PDF:
+                loader = PyPDFLoader(filepath)
+                docs.extend(loader.load())
+            else:
+                st.info(f"Skipping {filepath}: PyPDF2 not installed.")
         else:
-            st.warning(f"Skipping unsupported file: {filepath}")
+            st.info(f"Skipping unsupported file: {filepath}")
 
     if not docs:
         st.error("❌ No documents could be loaded from the data folder.")
