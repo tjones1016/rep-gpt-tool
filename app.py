@@ -6,16 +6,14 @@ from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import ConversationalRetrievalChain
-
-# For loading different document types
-from langchain.document_loaders import UnstructuredWordDocumentLoader, TextLoader
+from langchain.document_loaders import TextLoader
 
 # ---------------------
 # Streamlit Page Config
 # ---------------------
 st.set_page_config(
     page_title="Pro-Roofing AI Assistant",
-    page_icon="apple-touch-icon.png"  # Uses your logo for tab + favicon
+    page_icon="apple-touch-icon.png"
 )
 
 st.title("🦾 Pro-Roofing AI Assistant")
@@ -30,6 +28,18 @@ if not OPENAI_API_KEY:
     st.stop()
 
 # ---------------------
+# Helper: Try to load UnstructuredWordDocumentLoader if available
+# ---------------------
+try:
+    from langchain.document_loaders import UnstructuredWordDocumentLoader
+    HAS_UNSTRUCTURED = True
+except ImportError:
+    HAS_UNSTRUCTURED = False
+    st.warning(
+        "⚠️ `unstructured` package not installed. .docx files will be skipped."
+    )
+
+# ---------------------
 # Load all docs from data/
 # ---------------------
 @st.cache_resource
@@ -37,19 +47,20 @@ def load_vectorstore():
     docs = []
 
     for filepath in glob.glob("data/*"):
-        if filepath.endswith(".docx"):
-            loader = UnstructuredWordDocumentLoader(filepath)
-        elif filepath.endswith(".txt"):
+        if filepath.endswith(".txt"):
             loader = TextLoader(filepath)
-        else:
-            continue  # skip unsupported files
-        try:
             docs.extend(loader.load())
-        except Exception as e:
-            st.warning(f"Could not load {filepath}: {e}")
+        elif filepath.endswith(".docx"):
+            if HAS_UNSTRUCTURED:
+                loader = UnstructuredWordDocumentLoader(filepath)
+                docs.extend(loader.load())
+            else:
+                st.warning(f"Skipping {filepath}: unstructured not installed.")
+        else:
+            st.warning(f"Skipping unsupported file: {filepath}")
 
     if not docs:
-        st.error("❌ No documents found in the data folder.")
+        st.error("❌ No documents could be loaded from the data folder.")
         st.stop()
 
     splitter = RecursiveCharacterTextSplitter(
