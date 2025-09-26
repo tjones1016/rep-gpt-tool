@@ -1,120 +1,76 @@
 import os
 import streamlit as st
-import pandas as pd
-
-from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, CSVLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain.chat_models import ChatOpenAI
+from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.document_loaders import TextLoader
 from langchain.chains import ConversationalRetrievalChain
 
-# --- Hard-coded rules ---
-HARD_CODED_KNOWLEDGE = """
-SLAP Formula:
-- Say hi and introduce yourself
-- Let them know why you’re here
-- Ask an open-ended question
-- Present your pitch
-
-ARO Formula:
-- Acknowledge
-- Reassure
-- Overcome
-
-Pricing, Payment, Accountability:
-- Pricing: Adjusters use Xactimate for all estimates
-- Payment: 1st payment, deductible, 2nd payment
-- Accountability: Homeowner saves no money, the carrier controls the process, use the body shop analogy to communicate simplicity
-
-Uncertainty Rule:
-- If you’re unsure whether there’s enough roof damage, end with: "File the Claim — let the adjuster make the call."
-"""
-
-PRICING_DISCLAIMER = (
-    "Always confirm with Xactimate if an adjuster asks about pricing. "
-    "These prices are for rep reference only."
+# ---------------------
+# Streamlit Page Config
+# ---------------------
+st.set_page_config(
+    page_title="Pro-Roofing AI Assistant",
+    page_icon="apple-touch-icon.png"  # ✅ Uses your logo for tab + favicon
 )
 
-# --- Load documents into FAISS ---
+st.title("🦾 Pro-Roofing AI Assistant")
+st.caption("Powered by LangChain + OpenAI")
+
+# ---------------------
+# Load Environment Vars
+# ---------------------
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    st.error("❌ OPENAI_API_KEY not found in environment variables.")
+    st.stop()
+
+# ---------------------
+# Build Vector DB (example with sales guide)
+# ---------------------
 @st.cache_resource
 def load_vectorstore():
-    loaders = [
-        Docx2txtLoader("data/sales_guide.docx"),
-        Docx2txtLoader("data/sales_guide3.docx"),
-        PyPDFLoader("data/d2d_script.pdf"),
-    ]
-    docs = []
-    for loader in loaders:
-        docs.extend(loader.load())
+    # You can swap this for multiple docs later
+    loader = TextLoader("data/sales_guide.docx")  # adjust if needed
+    docs = loader.load()
 
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    split_docs = text_splitter.split_documents(docs)
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=100
+    )
+    chunks = splitter.split_documents(docs)
 
-    embeddings = OpenAIEmbeddings()
-    return FAISS.from_documents(split_docs, embeddings)
+    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+    vectorstore = FAISS.from_documents(chunks, embeddings)
+    return vectorstore
 
-# --- Load pricing CSV ---
-@st.cache_resource
-def load_pricing():
-    try:
-        df = pd.read_csv("data/pricing.csv")
-        return df
-    except Exception as e:
-        st.error(f"Error loading pricing.csv: {e}")
-        return pd.DataFrame()
+vectorstore = load_vectorstore()
 
-def lookup_price(query, df):
-    query_lower = query.lower()
-    for _, row in df.iterrows():
-        item_name = str(row["Item"]).lower()
-        if item_name in query_lower:
-            return f"{row['Item']}: {row['Price']} per {row['Unit']}. Notes: {row.get('Notes','')}\n\n{PRICING_DISCLAIMER}"
-    return None
+# ---------------------
+# Conversational Chain
+# ---------------------
+llm = ChatOpenAI(openai_api_key=OPENAI_API_KEY, model="gpt-4o-mini", temperature=0)
+qa_chain = ConversationalRetrievalChain.from_llm(
+    llm,
+    retriever=vectorstore.as_retriever()
+)
 
-# --- Setup conversational chain ---
-@st.cache_resource
-def setup_conversational_chain(vstore):
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-    retriever = vstore.as_retriever(search_kwargs={"k": 3})
-    return ConversationalRetrievalChain.from_llm(llm, retriever)
+# ---------------------
+# Chat UI
+# ---------------------
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
-# --- Streamlit UI ---
-def main():
-    st.set_page_config(page_title="Pro Roofing AI Assistant", page_icon=":construction:")
-    st.title("🦺 Pro Roofing AI Assistant")
+user_query = st.chat_input("Ask me anything about roofing, sales process, or materials...")
 
-    vstore = load_vectorstore()
-    qa_chain = setup_conversational_chain(vstore)
-    pricing_df = load_pricing()
+if user_query:
+    result = qa_chain(
+        {"question": user_query, "chat_history": st.session_state.chat_history}
+    )
+    st.session_state.chat_history.append((user_query, result["answer"]))
 
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-
-    user_query = st.chat_input("Ask me something...")
-    if user_query:
-        # 1. Check pricing first
-        pricing_answer = lookup_price(user_query, pricing_df)
-
-        if pricing_answer:
-            bot_response = pricing_answer
-        else:
-            # 2. Query vectorstore
-            result = qa_chain.invoke({"question": user_query, "chat_history": st.session_state.chat_history})
-            bot_response = result["answer"]
-
-            # 3. Add hard-coded rules
-            bot_response += "\n\n" + HARD_CODED_KNOWLEDGE
-
-        # Update chat history
-        st.session_state.chat_history.append(("User", user_query))
-        st.session_state.chat_history.append(("AI", bot_response))
-
-    # Display conversation
-    for speaker, text in st.session_state.chat_history:
-        if speaker == "User":
-            st.chat_message("user").markdown(text)
-        else:
-            st.chat_message("assistant").markdown(text)
-
-if __name__ == "__main__":
-    main()
+# Display Chat
+for i, (q, a) in enumerate(st.session_state.chat_history):
+    st.chat_message("user").write(q)
+    st.chat_message("assistant").write(a)
