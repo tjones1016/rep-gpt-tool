@@ -14,7 +14,6 @@ from langchain.memory import ConversationBufferMemory
 DATA_FOLDER = "data"
 EMBEDDINGS_FILE = "vectorstore/faiss_index"
 
-# Initialize model + embeddings
 embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -22,10 +21,16 @@ llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=os.getenv("O
 # HARDCODED RULES
 # --------------------------
 HARDCODED_RULES = {
-    "slap": "SLAP stands for Stop, Look, Ask, Pause. This is the only definition Pro-Roofing uses.",
-    "aro": "ARO means Ask for the Referral Opportunity. Always ask for referrals at the right time in the conversation.",
-    "pricing": "Pricing/Payment/Accountability: Reps must follow the company’s pricing guide, review payment terms with the homeowner, and maintain accountability in AccuLynx.",
-    "file the claim": "File-the-Claim: If the homeowner is ready, walk them through calling their insurance carrier to file the claim right away."
+    "slap": "SLAP stands for Stop, Look, Ask, Present. This is the only definition Pro-Roofing uses.",
+    "aro": "ARO means Acknowledge, Reassure, Overcome. This is the method reps use for objection handling.",
+    "pricing": (
+        "Pricing, Payment, and Accountability:\n"
+        "- Pricing: Adjusters use Xactimate.\n"
+        "- Payment: 1st payment (ACV), deductible, then 2nd payment (recoverable depreciation).\n"
+        "- Accountability: No money is saved by the homeowner. The carrier controls the process. "
+        "Use the body shop analogy to explain the simplicity of the process."
+    ),
+    "file the claim": "If you’re unsure whether there’s enough damage on a roof, the response should end with: 'File the Claim and let the adjuster make the call.'"
 }
 
 def check_hardcoded_rules(query: str):
