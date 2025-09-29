@@ -1,108 +1,94 @@
 import os
 import streamlit as st
-from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, CSVLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_community.vectorstores import FAISS
+from langchain_community.document_loaders import PyPDFLoader, CSVLoader
+from langchain_community.document_loaders import UnstructuredWordDocumentLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 
-# --- CONFIG ---
-st.set_page_config(page_title="Pro Roofing AI Assistant", page_icon="apple-touch-icon.png")
+# --------------------------
+# SETTINGS
+# --------------------------
+DATA_FOLDER = "data"
+EMBEDDINGS_FILE = "vectorstore/faiss_index"
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    st.error("Missing OPENAI_API_KEY in environment variables.")
-    st.stop()
+# Initialize model + embeddings
+embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=os.getenv("OPENAI_API_KEY"))
 
-# --- LOAD DOCUMENTS ---
-@st.cache_resource
-def load_vectorstore():
-    docs = []
+# --------------------------
+# HARDCODED RULES
+# --------------------------
+HARDCODED_RULES = {
+    "slap": "SLAP stands for Stop, Look, Ask, Pause. This is the only definition Pro-Roofing uses.",
+    "aro": "ARO means Ask for the Referral Opportunity. Always ask for referrals at the right time in the conversation.",
+    "pricing": "Pricing/Payment/Accountability: Reps must follow the company’s pricing guide, review payment terms with the homeowner, and maintain accountability in AccuLynx.",
+    "file the claim": "File-the-Claim: If the homeowner is ready, walk them through calling their insurance carrier to file the claim right away."
+}
 
-    data_files = [
-        "data/d2d_script.pdf",
-        "data/sales_guide.docx",
-        "data/sales_guide3.docx",
-        "data/pricing.csv",
-    ]
-
-    for filepath in data_files:
-        if not os.path.exists(filepath):
-            st.warning(f"File not found: {filepath}")
-            continue
-
-        if filepath.endswith(".pdf"):
-            loader = PyPDFLoader(filepath)
-        elif filepath.endswith(".docx"):
-            loader = Docx2txtLoader(filepath)
-        elif filepath.endswith(".csv"):
-            loader = CSVLoader(filepath)
-        else:
-            st.warning(f"Unsupported file type: {filepath}")
-            continue
-
-        docs.extend(loader.load())
-
-    # Split into chunks
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    chunks = splitter.split_documents(docs)
-
-    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-    return FAISS.from_documents(chunks, embeddings)
-
-vectorstore = load_vectorstore()
-
-# --- SETUP CHAIN ---
-memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-
-qa_chain = ConversationalRetrievalChain.from_llm(
-    llm=ChatOpenAI(temperature=0, openai_api_key=OPENAI_API_KEY),
-    retriever=vectorstore.as_retriever(),
-    memory=memory,
-)
-
-# --- HARDCODED RULES ---
-def apply_rules(user_input: str):
-    rules = {
-        "slap": "Remember SLAP: Smile, Look, Ask, Pause.",
-        "aro": "Use ARO: Acknowledge, Reassure, Overcome.",
-        "pricing": "Pricing must follow the official pricing guide in pricing.csv.",
-        "payment": "Payment and accountability rules are outlined in the Sales Guide.",
-        "file the claim": "If unsure, fallback to: 'Let’s go ahead and file the claim with the insurance provider.'",
-    }
-    for key, response in rules.items():
-        if key in user_input.lower():
+def check_hardcoded_rules(query: str):
+    q_lower = query.lower()
+    for key, response in HARDCODED_RULES.items():
+        if key in q_lower:
             return response
     return None
 
-# --- UI ---
-st.title("🤖 Pro Roofing AI Assistant")
+# --------------------------
+# LOAD VECTORSTORE
+# --------------------------
+@st.cache_resource
+def load_vectorstore():
+    if os.path.exists(EMBEDDINGS_FILE):
+        return FAISS.load_local(EMBEDDINGS_FILE, embeddings, allow_dangerous_deserialization=True)
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+    docs = []
+    for file in os.listdir(DATA_FOLDER):
+        filepath = os.path.join(DATA_FOLDER, file)
+        if file.endswith(".pdf"):
+            loader = PyPDFLoader(filepath)
+            docs.extend(loader.load())
+        elif file.endswith(".docx"):
+            loader = UnstructuredWordDocumentLoader(filepath)
+            docs.extend(loader.load())
+        elif file.endswith(".csv"):
+            loader = CSVLoader(filepath)
+            docs.extend(loader.load())
 
-# Display past chat
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    split_docs = splitter.split_documents(docs)
 
-# Input
-if user_input := st.chat_input("Ask me something..."):
-    # Store user message
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    with st.chat_message("user"):
-        st.markdown(user_input)
+    vectorstore = FAISS.from_documents(split_docs, embeddings)
+    vectorstore.save_local(EMBEDDINGS_FILE)
+    return vectorstore
 
-    # Check hard-coded rules
-    rule_response = apply_rules(user_input)
-    if rule_response:
-        response = rule_response
+vectorstore = load_vectorstore()
+
+# Conversational Retrieval
+memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+qa_chain = ConversationalRetrievalChain.from_llm(
+    llm=llm,
+    retriever=vectorstore.as_retriever(),
+    memory=memory
+)
+
+# --------------------------
+# STREAMLIT APP
+# --------------------------
+st.set_page_config(page_title="Pro-Roofing AI Assistant", page_icon="🦺")
+
+st.image("apple-touch-icon.png", width=120)
+st.title("Pro-Roofing AI Assistant")
+
+user_query = st.chat_input("Ask me anything about sales, pricing, or procedures...")
+
+if user_query:
+    # First check hardcoded rules
+    hardcoded_response = check_hardcoded_rules(user_query)
+    if hardcoded_response:
+        st.chat_message("assistant").write(hardcoded_response)
     else:
-        result = qa_chain({"question": user_input})
-        response = result["answer"]
-
-    # Store and display response
-    st.session_state.messages.append({"role": "assistant", "content": response})
-    with st.chat_message("assistant"):
-        st.markdown(response)
+        # Otherwise query vectorstore + LLM
+        response = qa_chain.run(user_query)
+        st.chat_message("assistant").write(response)
