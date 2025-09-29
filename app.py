@@ -1,61 +1,53 @@
 import os
 import streamlit as st
+from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_community.vectorstores import FAISS
-from langchain_community.document_loaders import PyPDFLoader, CSVLoader
-from langchain_community.document_loaders import UnstructuredWordDocumentLoader
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, CSVLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 
-# --------------------------
-# SETTINGS
-# --------------------------
-DATA_FOLDER = "data"
-EMBEDDINGS_FILE = "vectorstore/faiss_index"
+# Load environment variables
+load_dotenv()
+openai_api_key = os.getenv("OPENAI_API_KEY")
 
-embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=os.getenv("OPENAI_API_KEY"))
+if not openai_api_key:
+    st.error("OPENAI_API_KEY is missing. Please set it in your environment variables.")
+    st.stop()
 
-# --------------------------
-# HARDCODED RULES
-# --------------------------
-HARDCODED_RULES = {
-    "slap": "SLAP stands for Stop, Look, Ask, Present. This is the only definition Pro-Roofing uses.",
-    "aro": "ARO means Acknowledge, Reassure, Overcome. This is the method reps use for objection handling.",
-    "pricing": (
-        "Pricing, Payment, and Accountability:\n"
-        "- Pricing: Adjusters use Xactimate.\n"
-        "- Payment: 1st payment (ACV), deductible, then 2nd payment (recoverable depreciation).\n"
-        "- Accountability: No money is saved by the homeowner. The carrier controls the process. "
-        "Use the body shop analogy to explain the simplicity of the process."
-    ),
-    "file the claim": "If you’re unsure whether there’s enough damage on a roof, the response should end with: 'File the Claim and let the adjuster make the call.'"
+# --- Hardcoded company rules ---
+HARD_CODED_RULES = {
+    "slap": """SLAP Formula:
+1. Say hi and introduce yourself
+2. Let them know why you’re here
+3. Ask an open-ended question
+4. Present your pitch""",
+    "aro": """ARO Formula:
+1. Acknowledge
+2. Reassure
+3. Overcome""",
+    "pricing_payment_accountability": """After filing the claim, the rep must explain:
+- Pricing: Adjusters use Xactimate
+- Payment: 1st payment (ACV), deductible, 2nd payment (depreciation)
+- Accountability: No money is saved, carrier controls the process.
+Use the body shop analogy to communicate the simplicity of the process.""",
+    "file_claim": """If you’re not sure whether there’s enough roof damage, always advise:
+"File the Claim — let the adjuster make the call.""""
 }
 
-def check_hardcoded_rules(query: str):
-    q_lower = query.lower()
-    for key, response in HARDCODED_RULES.items():
-        if key in q_lower:
-            return response
-    return None
-
-# --------------------------
-# LOAD VECTORSTORE
-# --------------------------
+# --- Function to load documents and build vectorstore ---
 @st.cache_resource
 def load_vectorstore():
-    if os.path.exists(EMBEDDINGS_FILE):
-        return FAISS.load_local(EMBEDDINGS_FILE, embeddings, allow_dangerous_deserialization=True)
-
+    data_dir = "data"
     docs = []
-    for file in os.listdir(DATA_FOLDER):
-        filepath = os.path.join(DATA_FOLDER, file)
+    for file in os.listdir(data_dir):
+        filepath = os.path.join(data_dir, file)
         if file.endswith(".pdf"):
             loader = PyPDFLoader(filepath)
             docs.extend(loader.load())
         elif file.endswith(".docx"):
-            loader = UnstructuredWordDocumentLoader(filepath)
+            loader = Docx2txtLoader(filepath)
             docs.extend(loader.load())
         elif file.endswith(".csv"):
             loader = CSVLoader(filepath)
@@ -63,37 +55,57 @@ def load_vectorstore():
 
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     split_docs = splitter.split_documents(docs)
-
-    vectorstore = FAISS.from_documents(split_docs, embeddings)
-    vectorstore.save_local(EMBEDDINGS_FILE)
-    return vectorstore
+    embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
+    return FAISS.from_documents(split_docs, embeddings)
 
 vectorstore = load_vectorstore()
 
-# Conversational Retrieval
-memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-qa_chain = ConversationalRetrievalChain.from_llm(
-    llm=llm,
-    retriever=vectorstore.as_retriever(),
-    memory=memory
-)
+# --- Conversational Chain Setup ---
+def setup_conversational_chain():
+    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, openai_api_key=openai_api_key)
+    return ConversationalRetrievalChain.from_llm(
+        llm=llm,
+        retriever=vectorstore.as_retriever(),
+        memory=memory,
+    )
 
-# --------------------------
-# STREAMLIT APP
-# --------------------------
-st.set_page_config(page_title="Pro-Roofing AI Assistant", page_icon="🦺")
+qa_chain = setup_conversational_chain()
 
-st.image("apple-touch-icon.png", width=120)
-st.title("Pro-Roofing AI Assistant")
+# --- Streamlit UI ---
+st.set_page_config(page_title="Pro-Roofing AI Assistant", page_icon=":construction:")
 
-user_query = st.chat_input("Ask me anything about sales, pricing, or procedures...")
+st.title("🏠 Pro-Roofing AI Assistant")
+st.write("Ask me about sales scripts, pricing, storm damage, or company processes.")
 
-if user_query:
-    # First check hardcoded rules
-    hardcoded_response = check_hardcoded_rules(user_query)
-    if hardcoded_response:
-        st.chat_message("assistant").write(hardcoded_response)
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+user_input = st.chat_input("Type your question here...")
+
+if user_input:
+    lower_q = user_input.lower()
+
+    # --- Hardcoded rule checks ---
+    if "slap" in lower_q:
+        response = HARD_CODED_RULES["slap"]
+    elif "aro" in lower_q:
+        response = HARD_CODED_RULES["aro"]
+    elif "pricing" in lower_q or "payment" in lower_q or "accountability" in lower_q:
+        response = HARD_CODED_RULES["pricing_payment_accountability"]
+    elif "not sure" in lower_q or "enough damage" in lower_q:
+        response = HARD_CODED_RULES["file_claim"]
     else:
-        # Otherwise query vectorstore + LLM
-        response = qa_chain.run(user_query)
-        st.chat_message("assistant").write(response)
+        result = qa_chain({"question": user_input})
+        response = result["answer"]
+
+    # Save chat history
+    st.session_state.chat_history.append(("You", user_input))
+    st.session_state.chat_history.append(("AI", response))
+
+# --- Display chat history ---
+for role, msg in st.session_state.chat_history:
+    if role == "You":
+        st.chat_message("user").write(msg)
+    else:
+        st.chat_message("assistant").write(msg)
