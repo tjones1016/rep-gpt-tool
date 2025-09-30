@@ -107,7 +107,7 @@ qa_chain = setup_conversational_chain()
 # -----------------------------
 st.set_page_config(
     page_title="Pro-Roofing AI Assistant",
-    page_icon=":construction:"
+    page_icon="apple-touch-icon.png"
 )
 
 st.title("🏠 Pro-Roofing AI Assistant")
